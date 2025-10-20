@@ -8,7 +8,7 @@ return [
     'allowed_origins' => [
         'http://localhost:5173',
         'http://localhost:3001',
-        'https://syborg-qa9om.ondigitalocean.app',
+        'https://brimsclient-ihpwt.ondigitalocean.app/',
     ],
 
     'allowed_origins_patterns' => [],
