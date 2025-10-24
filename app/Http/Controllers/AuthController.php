@@ -563,4 +563,108 @@ class AuthController extends Controller
             ], 500);
         }
     }
+
+    public function uploadAvatar(Request $request)
+    {
+        try {
+            DB::beginTransaction();
+
+            $user = $request->user();
+
+            $validator = Validator::make($request->all(), [
+                'avatar' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Delete old avatar if exists
+            if ($user->avatar) {
+                Storage::disk('public')->delete($user->avatar);
+            }
+
+            // Store new avatar
+            $avatarPath = $request->file('avatar')->store('avatars', 'public');
+            $user->update(['avatar' => $avatarPath]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Avatar uploaded successfully',
+                'avatar_url' => Storage::url($avatarPath),
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'barangay_name' => $user->barangay_name,
+                    'position' => $user->position,
+                    'municipality' => $user->municipality,
+                    'contact' => $user->contact,
+                    'avatar' => Storage::url($avatarPath),
+                    'role' => $user->role,
+                    'is_approved' => $user->is_approved,
+                    'status' => $user->status,
+                    'is_active' => $user->is_active,
+                    'rejected_at' => $user->rejected_at,
+                    'rejection_reason' => $user->rejection_reason,
+                    'approved_at' => $user->approved_at,
+                    'created_at' => $user->created_at,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Avatar upload error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Avatar upload failed. Please try again.'
+            ], 500);
+        }
+    }
+
+    public function removeAvatar(Request $request)
+    {
+        try {
+            DB::beginTransaction();
+
+            $user = $request->user();
+
+            if ($user->avatar) {
+                Storage::disk('public')->delete($user->avatar);
+                $user->update(['avatar' => null]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Avatar removed successfully',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'barangay_name' => $user->barangay_name,
+                    'position' => $user->position,
+                    'municipality' => $user->municipality,
+                    'contact' => $user->contact,
+                    'avatar' => null,
+                    'role' => $user->role,
+                    'is_approved' => $user->is_approved,
+                    'status' => $user->status,
+                    'is_active' => $user->is_active,
+                    'rejected_at' => $user->rejected_at,
+                    'rejection_reason' => $user->rejection_reason,
+                    'approved_at' => $user->approved_at,
+                    'created_at' => $user->created_at,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Avatar remove error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Avatar removal failed. Please try again.'
+            ], 500);
+        }
+    }
 }

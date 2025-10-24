@@ -22,6 +22,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/profile/update', [AuthController::class, 'updateProfile']);
     Route::put('/profile/change-password', [AuthController::class, 'changePassword']);
 
+    // Avatar management routes
+    Route::post('/profile/avatar', [AuthController::class, 'uploadAvatar']);
+    Route::delete('/profile/avatar', [AuthController::class, 'removeAvatar']);
+
     // Admin routes
     Route::prefix('admin')->group(function () {
         // User approval management
