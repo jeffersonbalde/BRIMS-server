@@ -24,6 +24,9 @@ return new class extends Migration
             $table->string('avatar')->nullable();
             $table->string('role')->default('barangay');
             $table->boolean('is_approved')->default(false); 
+            $table->timestamp('approved_at')->nullable(); // ADD THIS
+            $table->timestamp('rejected_at')->nullable(); // ADD THIS
+            $table->text('rejection_reason')->nullable(); // ADD THIS
             $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');
             $table->boolean('is_active')->default(true);
             $table->rememberToken();

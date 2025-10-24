@@ -248,6 +248,12 @@ class AuthController extends Controller
                         'role' => $user->role,
                         'is_approved' => $user->is_approved,
                         'status' => $user->status,
+                        'is_active' => $user->is_active,
+                        // Add these rejection fields:
+                        'rejected_at' => $user->rejected_at,
+                        'rejection_reason' => $user->rejection_reason,
+                        'approved_at' => $user->approved_at,
+                        'created_at' => $user->created_at,
                     ],
                     'warning' => 'Your account is pending approval. Some features may be limited.'
                 ], 200);
@@ -271,6 +277,12 @@ class AuthController extends Controller
                     'role' => $user->role,
                     'is_approved' => $user->is_approved,
                     'status' => $user->status,
+                    'is_active' => $user->is_active,
+                    // Add these rejection fields:
+                    'rejected_at' => $user->rejected_at,
+                    'rejection_reason' => $user->rejection_reason,
+                    'approved_at' => $user->approved_at,
+                    'created_at' => $user->created_at,
                 ]
             ]);
         } catch (ValidationException $e) {
@@ -320,6 +332,12 @@ class AuthController extends Controller
                     'role' => $user->role,
                     'is_approved' => $user->is_approved,
                     'status' => $user->status,
+                    'is_active' => $user->is_active,
+                    // Add these rejection fields:
+                    'rejected_at' => $user->rejected_at,
+                    'rejection_reason' => $user->rejection_reason,
+                    'approved_at' => $user->approved_at,
+                    'created_at' => $user->created_at,
                 ]
             ]);
         } catch (\Exception $e) {
@@ -350,6 +368,12 @@ class AuthController extends Controller
                         'role' => $user->role,
                         'is_approved' => $user->is_approved,
                         'status' => $user->status,
+                        'is_active' => $user->is_active,
+                        // Add these rejection fields:
+                        'rejected_at' => $user->rejected_at,
+                        'rejection_reason' => $user->rejection_reason,
+                        'approved_at' => $user->approved_at,
+                        'created_at' => $user->created_at,
                     ]
                 ]);
             }
@@ -402,6 +426,141 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             Log::error('Avatar serve error: ' . $e->getMessage());
             abort(404);
+        }
+    }
+
+    // Add to AuthController.php
+    public function updateProfile(Request $request)
+    {
+        try {
+            DB::beginTransaction();
+
+            $user = $request->user();
+
+            $validator = Validator::make($request->all(), [
+                'name' => 'required|string|max:255',
+                'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
+                'contact' => 'required|string|max:20',
+                'position' => 'required|string|max:255',
+            ], [
+                'email.unique' => 'This email address is already registered.',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Check for duplicate contact number
+            $existingContact = User::where('contact', $request->contact)
+                ->where('id', '!=', $user->id)
+                ->first();
+
+            if ($existingContact) {
+                return response()->json([
+                    'message' => 'Duplicate data found',
+                    'errors' => ['contact' => ['This contact number is already registered.']]
+                ], 422);
+            }
+
+            // Update user profile
+            $user->update([
+                'name' => $request->name,
+                'email' => $request->email,
+                'contact' => $request->contact,
+                'position' => $request->position,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Profile updated successfully',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'barangay_name' => $user->barangay_name,
+                    'position' => $user->position,
+                    'municipality' => $user->municipality,
+                    'contact' => $user->contact,
+                    'avatar' => $user->avatar ? Storage::url($user->avatar) : null,
+                    'role' => $user->role,
+                    'is_approved' => $user->is_approved,
+                    'status' => $user->status,
+                    'is_active' => $user->is_active,
+                    'rejected_at' => $user->rejected_at,
+                    'rejection_reason' => $user->rejection_reason,
+                    'approved_at' => $user->approved_at,
+                    'created_at' => $user->created_at,
+                ]
+            ]);
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Profile update error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Profile update failed. Please try again.'
+            ], 500);
+        }
+    }
+
+    public function changePassword(Request $request)
+    {
+        try {
+            DB::beginTransaction();
+
+            $validator = Validator::make($request->all(), [
+                'current_password' => 'required|string',
+                'new_password' => 'required|string|min:8',
+                'confirm_password' => 'required|string|same:new_password',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $user = $request->user();
+
+            // Check current password
+            if (!Hash::check($request->current_password, $user->password)) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => ['current_password' => ['The current password is incorrect.']]
+                ], 422);
+            }
+
+            // Update password
+            $user->update([
+                'password' => Hash::make($request->new_password)
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Password changed successfully'
+            ]);
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Password change error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Password change failed. Please try again.'
+            ], 500);
         }
     }
 }

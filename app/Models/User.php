@@ -31,6 +31,9 @@ class User extends Authenticatable
         'is_approved',
         'status',
         'is_active',
+        'approved_at',      // Add this
+        'rejected_at',      // Add this
+        'rejection_reason', // Add this
     ];
 
     /**
@@ -55,6 +58,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_approved' => 'boolean',
             'is_active' => 'boolean',
+            'approved_at' => 'datetime',  // Add this
+            'rejected_at' => 'datetime',  // Add this
         ];
     }
 }
