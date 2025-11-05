@@ -3,7 +3,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Incident;
 use App\Models\User;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -12,6 +14,229 @@ use Illuminate\Support\Facades\DB;
 
 class AdminController extends Controller
 {
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
+
+    /**
+     * Deactivate user account
+     */
+    public function deactivateUser(Request $request, $userId)
+    {
+        try {
+            DB::beginTransaction();
+
+            $user = User::findOrFail($userId);
+            $admin = $request->user();
+
+            // Store previous status for notification
+            $previousStatus = $user->is_active;
+
+            // Deactivate the user
+            $user->update([
+                'is_active' => false,
+                'deactivated_at' => now(),
+                'deactivated_by' => $admin->id,
+                'deactivation_reason' => $request->deactivation_reason
+            ]);
+
+            // Create notification for the deactivated user
+            $this->notificationService->createNotification(
+                $user->id,
+                NotificationService::TYPE_ACCOUNT_DEACTIVATED,
+                'Account Deactivated',
+                "Your account has been deactivated by administrator. Reason: " . ($request->deactivation_reason ?? 'No reason provided'),
+                [
+                    'action' => 'account_deactivated',
+                    'deactivated_by' => $admin->name,
+                    'deactivation_reason' => $request->deactivation_reason,
+                    'deactivated_at' => now()->toISOString()
+                ]
+            );
+
+            // Send email notification
+            $this->notificationService->sendEmailNotification(
+                $user->id,
+                NotificationService::TYPE_ACCOUNT_DEACTIVATED,
+                'Account Deactivated - BRIMS',
+                $this->getAccountDeactivatedEmailContent($user, $admin, $request->deactivation_reason)
+            );
+
+            // Notify admins about the deactivation
+            $this->notificationService->notifyAdmins(
+                NotificationService::TYPE_ADMIN_ALERT,
+                'User Account Deactivated',
+                "User {$user->name} ({$user->barangay_name}) has been deactivated by {$admin->name}",
+                [
+                    'user_id' => $user->id,
+                    'user_name' => $user->name,
+                    'admin_name' => $admin->name,
+                    'action' => 'account_deactivated'
+                ]
+            );
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User account deactivated successfully',
+                'user' => $user->fresh()
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Deactivate user error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to deactivate user account'
+            ], 500);
+        }
+    }
+
+    /**
+     * Reactivate user account
+     */
+    public function reactivateUser(Request $request, $userId)
+    {
+        try {
+            DB::beginTransaction();
+
+            $user = User::findOrFail($userId);
+            $admin = $request->user();
+
+            // Reactivate the user
+            $user->update([
+                'is_active' => true,
+                'deactivated_at' => null,
+                'deactivated_by' => null,
+                'deactivation_reason' => null,
+                'reactivated_at' => now(),
+                'reactivated_by' => $admin->id
+            ]);
+
+            // Create notification for the reactivated user
+            $this->notificationService->createNotification(
+                $user->id,
+                NotificationService::TYPE_ACCOUNT_REACTIVATED,
+                'Account Reactivated',
+                "Your account has been reactivated by administrator. You can now access the system.",
+                [
+                    'action' => 'account_reactivated',
+                    'reactivated_by' => $admin->name,
+                    'reactivated_at' => now()->toISOString()
+                ]
+            );
+
+            // Send email notification
+            $this->notificationService->sendEmailNotification(
+                $user->id,
+                NotificationService::TYPE_ACCOUNT_REACTIVATED,
+                'Account Reactivated - BRIMS',
+                $this->getAccountReactivatedEmailContent($user, $admin)
+            );
+
+            // Notify admins about the reactivation
+            $this->notificationService->notifyAdmins(
+                NotificationService::TYPE_ADMIN_ALERT,
+                'User Account Reactivated',
+                "User {$user->name} ({$user->barangay_name}) has been reactivated by {$admin->name}",
+                [
+                    'user_id' => $user->id,
+                    'user_name' => $user->name,
+                    'admin_name' => $admin->name,
+                    'action' => 'account_reactivated'
+                ]
+            );
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User account reactivated successfully',
+                'user' => $user->fresh()
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Reactivate user error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to reactivate user account'
+            ], 500);
+        }
+    }
+
+
+    /**
+     * Email content for account deactivation
+     */
+    private function getAccountDeactivatedEmailContent($user, $admin, $reason)
+    {
+        return "
+        <h2>Account Deactivated</h2>
+        <p>Dear {$user->name},</p>
+        
+        <p>Your BRIMS account has been deactivated by an administrator.</p>
+        
+        <div style='background: #fff3f3; padding: 15px; margin: 15px 0; border-left: 4px solid #dc3545;'>
+            <p><strong>Deactivation Details:</strong></p>
+            <ul>
+                <li><strong>Deactivated By:</strong> {$admin->name}</li>
+                <li><strong>Deactivation Date:</strong> " . now()->format('F j, Y g:i A') . "</li>
+                <li><strong>Reason:</strong> " . ($reason ?? 'No reason provided') . "</li>
+            </ul>
+        </div>
+
+        <p><strong>What this means:</strong></p>
+        <ul>
+            <li>You will no longer be able to access your BRIMS account</li>
+            <li>You cannot report new incidents</li>
+            <li>You cannot view existing incident data</li>
+            <li>All your account permissions have been revoked</li>
+        </ul>
+
+        <p>If you believe this deactivation was made in error, please contact the municipal administrator.</p>
+        
+        <p><em>This is an automated message from BRIMS. Please do not reply to this email.</em></p>
+        ";
+    }
+
+    /**
+     * Email content for account reactivation
+     */
+    private function getAccountReactivatedEmailContent($user, $admin)
+    {
+        return "
+        <h2>Account Reactivated</h2>
+        <p>Dear {$user->name},</p>
+        
+        <p>Your BRIMS account has been reactivated by an administrator.</p>
+        
+        <div style='background: #f0fff4; padding: 15px; margin: 15px 0; border-left: 4px solid #28a745;'>
+            <p><strong>Reactivation Details:</strong></p>
+            <ul>
+                <li><strong>Reactivated By:</strong> {$admin->name}</li>
+                <li><strong>Reactivation Date:</strong> " . now()->format('F j, Y g:i A') . "</li>
+            </ul>
+        </div>
+
+        <p><strong>Your account access has been restored:</strong></p>
+        <ul>
+            <li>You can now log in to your BRIMS account</li>
+            <li>All previous incident data is available</li>
+            <li>You can report new incidents</li>
+            <li>Your account permissions have been restored</li>
+        </ul>
+
+        <p>You can access your account at: " . config('app.url') . "</p>
+        
+        <p>Welcome back to BRIMS!</p>
+        
+        <p><em>This is an automated message from BRIMS. Please do not reply to this email.</em></p>
+        ";
+    }
+
     public function getPendingUsers(Request $request)
     {
         try {
@@ -176,7 +401,10 @@ class AdminController extends Controller
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
 
-            $users = User::orderBy('created_at', 'desc')->get();
+            // Only get barangay users, exclude admin users
+            $users = User::where('role', 'barangay')
+                ->orderBy('created_at', 'desc')
+                ->get();
 
             return response()->json([
                 'users' => $users->map(function ($user) {
@@ -241,7 +469,6 @@ class AdminController extends Controller
         }
     }
 
-    // Add this method to AdminController.php
     public function getPendingUsersCount(Request $request)
     {
         try {
@@ -264,4 +491,280 @@ class AdminController extends Controller
             return response()->json(['message' => 'Failed to fetch pending users count'], 500);
         }
     }
+
+    public function getAllIncidents(Request $request)
+    {
+        try {
+            $incidents = Incident::with(['reporter'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'incidents' => $incidents
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get all incidents error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to fetch incidents'
+            ], 500);
+        }
+    }
+
+    public function updateIncidentStatus(Request $request, Incident $incident)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'status' => 'required|in:Reported,Investigating,Resolved',
+                'admin_notes' => 'nullable|string',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $oldStatus = $incident->status;
+            $newStatus = $request->status;
+
+            $incident->update([
+                'status' => $newStatus,
+                'admin_notes' => $request->admin_notes,
+            ]);
+
+            // Send notification to the reporter
+            if ($oldStatus !== $newStatus) {
+                $this->notificationService->notifyIncidentStatusChanged($incident, $oldStatus, $newStatus);
+            }
+
+            return response()->json([
+                'message' => 'Incident status updated successfully',
+                'incident' => $incident->load(['reporter'])
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Update incident status error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to update incident status'
+            ], 500);
+        }
+    }
+
+
+    // Add this method to your AdminController.php
+    public function archiveIncident(Request $request, Incident $incident)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'archive_reason' => 'required|string|min:5|max:500',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $oldStatus = $incident->status;
+
+            $incident->update([
+                'status' => 'Archived',
+                'archive_reason' => $request->archive_reason,
+                'archived_at' => now(),
+                'archived_by' => $request->user()->id,
+            ]);
+
+            // Send notification to the reporter
+            $this->notificationService->notifyIncidentArchived($incident, $request->archive_reason);
+
+            // Log the archiving action
+            Log::info("Incident archived", [
+                'incident_id' => $incident->id,
+                'archived_by' => $request->user()->id,
+                'old_status' => $oldStatus,
+                'reason' => $request->archive_reason
+            ]);
+
+            return response()->json([
+                'message' => 'Incident archived successfully',
+                'incident' => $incident->load(['reporter', 'archiver'])
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Archive incident error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to archive incident'
+            ], 500);
+        }
+    }
+
+
+    // Add to AdminController.php
+    public function unarchiveIncident(Request $request, Incident $incident)
+    {
+        try {
+            // Check if incident is actually archived
+            if ($incident->status !== 'Archived') {
+                return response()->json([
+                    'message' => 'Incident is not archived'
+                ], 400);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'unarchive_reason' => 'required|string|min:5|max:500',
+                'new_status' => 'required|in:Reported,Investigating,Resolved'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Store archive history before unarchiving
+            $archiveHistory = [
+                'archived_at' => $incident->archived_at,
+                'archived_by' => $incident->archived_by,
+                'archive_reason' => $incident->archive_reason,
+                'unarchived_at' => now(),
+                'unarchived_by' => $request->user()->id,
+                'unarchive_reason' => $request->unarchive_reason,
+                'previous_status' => $incident->status,
+                'new_status' => $request->new_status
+            ];
+
+            $incident->update([
+                'status' => $request->new_status,
+                'archive_reason' => null,
+                'archived_at' => null,
+                'archived_by' => null,
+                'unarchive_history' => json_encode($archiveHistory), // Store history
+                'admin_notes' => $incident->admin_notes . "\n\n--- UNARCHIVED ---\n" .
+                    "Unarchived on: " . now()->format('Y-m-d H:i:s') . "\n" .
+                    "Reason: " . $request->unarchive_reason . "\n" .
+                    "New Status: " . $request->new_status
+            ]);
+
+            // Send notification to the reporter
+            $this->notificationService->notifyIncidentUnarchived($incident, $request->new_status, $request->unarchive_reason);
+
+            // Log the unarchiving action
+            Log::info("Incident unarchived", [
+                'incident_id' => $incident->id,
+                'unarchived_by' => $request->user()->id,
+                'new_status' => $request->new_status,
+                'reason' => $request->unarchive_reason
+            ]);
+
+            return response()->json([
+                'message' => 'Incident unarchived successfully',
+                'incident' => $incident->load(['reporter'])
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Unarchive incident error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to unarchive incident'
+            ], 500);
+        }
+    }
+
+// Add this method to your AdminController.php
+public function getAllBarangaysWithPopulationData(Request $request)
+{
+    try {
+        // Check if user is admin
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        // Get all approved barangay users
+        $barangayUsers = User::where('role', 'barangay')
+            ->where('is_approved', true)
+            ->where('is_active', true)
+            ->select('barangay_name', 'municipality')
+            ->distinct()
+            ->get();
+
+        $result = [];
+
+        foreach ($barangayUsers as $user) {
+            $barangayName = $user->barangay_name;
+            
+            // Get incidents for this barangay with population data
+            // Use populationData() instead of population_data()
+            $incidents = Incident::with(['reporter', 'populationData'])
+                ->whereHas('reporter', function($query) use ($barangayName) {
+                    $query->where('barangay_name', $barangayName);
+                })
+                ->whereHas('populationData') // Fixed: use populationData instead of population_data
+                ->get();
+
+            // Calculate basic totals
+            $totalPopulation = $incidents->sum(function($incident) {
+                $pop = $incident->populationData; // Fixed: use populationData instead of population_data
+                return ($pop->male_count ?? 0) + ($pop->female_count ?? 0) + ($pop->lgbtqia_count ?? 0);
+            });
+
+            $totalDisplaced = $incidents->sum(function($incident) {
+                return $incident->populationData->displaced_persons ?? 0; // Fixed: use populationData
+            });
+
+            $result[] = [
+                'barangay_name' => $barangayName,
+                'municipality' => $user->municipality,
+                'total_incidents' => $incidents->count(),
+                'population_data' => [
+                    'total_population' => $totalPopulation,
+                    'male_count' => $incidents->sum(function($incident) {
+                        return $incident->populationData->male_count ?? 0; // Fixed: use populationData
+                    }),
+                    'female_count' => $incidents->sum(function($incident) {
+                        return $incident->populationData->female_count ?? 0; // Fixed: use populationData
+                    }),
+                    'lgbtqia_count' => $incidents->sum(function($incident) {
+                        return $incident->populationData->lgbtqia_count ?? 0; // Fixed: use populationData
+                    }),
+                    'displaced_persons' => $totalDisplaced,
+                    'displaced_families' => $incidents->sum(function($incident) {
+                        return $incident->populationData->displaced_families ?? 0; // Fixed: use populationData
+                    }),
+                    'families_assisted' => $incidents->sum(function($incident) {
+                        return $incident->populationData->families_assisted ?? 0; // Fixed: use populationData
+                    }),
+                    'families_requiring_assistance' => $incidents->sum(function($incident) {
+                        return $incident->populationData->families_requiring_assistance ?? 0; // Fixed: use populationData
+                    }),
+                    'pwd_count' => $incidents->sum(function($incident) {
+                        return $incident->populationData->pwd_count ?? 0; // Fixed: use populationData
+                    }),
+                    'elderly_count' => $incidents->sum(function($incident) {
+                        return $incident->populationData->elderly_count ?? 0; // Fixed: use populationData
+                    }),
+                    'pregnant_count' => $incidents->sum(function($incident) {
+                        return $incident->populationData->pregnant_count ?? 0; // Fixed: use populationData
+                    }),
+                ],
+                'has_population_data' => $incidents->count() > 0,
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'barangays' => $result,
+            'total_barangays' => count($result),
+            'barangays_with_data' => collect($result)->where('has_population_data', true)->count(),
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Get all barangays with population data error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch barangay population data: ' . $e->getMessage()
+        ], 500);
+    }
+}
 }

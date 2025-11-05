@@ -13,9 +13,17 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use App\Services\NotificationService;
 
 class AuthController extends Controller
 {
+        protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
+    
     public function register(Request $request)
     {
         try {
@@ -23,7 +31,7 @@ class AuthController extends Controller
 
             // Custom validation rules with specific messages
             $validator = Validator::make($request->all(), [
-                'name' => 'required|string|max:255',
+                'name' => 'required|string|max:255',    
                 'barangayName' => 'required|string|max:255',
                 'position' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:users',
@@ -214,12 +222,24 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // Check if user is active
-            if (!$user->is_active) {
-                return response()->json([
-                    'message' => 'Your account has been deactivated. Please contact administrator.'
-                ], 401);
-            }
+// In AuthController login method - add this check after user existence check
+if (!$user->is_active) {
+    // Create a notification for the user about login attempt while deactivated
+    $this->notificationService->createNotification(
+        $user->id,
+        NotificationService::TYPE_LOGIN_BLOCKED,
+        'Login Attempt Blocked',
+        'Your login attempt was blocked because your account is deactivated. Please contact administrator.',
+        [
+            'attempted_at' => now()->toISOString(),
+            'ip_address' => $request->ip()
+        ]
+    );
+
+    return response()->json([
+        'message' => 'Your account has been deactivated. Please contact administrator.'
+    ], 401);
+}
 
             // Check password
             if (!Hash::check($request->password, $user->password)) {

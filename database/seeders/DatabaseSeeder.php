@@ -23,9 +23,7 @@ class DatabaseSeeder extends Seeder
         // ]);
         $this->call([
             UserSeeder::class,
-            // Add other seeders here when you create them
-            // ClientSeeder::class,
-            // ProjectSeeder::class,
+            // IncidentSeeder::class, 
         ]);
     }
 }
