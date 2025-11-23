@@ -1092,4 +1092,210 @@ public function generateSummaryReport(Request $request)
         ], 500);
     }
 }
+
+
+
+
+// Add this method to your ReportController.php
+
+/**
+ * Generate detailed families and persons report
+ */
+public function generateFamiliesPersonsReport(Request $request)
+{
+    try {
+        $dateFrom = $request->get('date_from');
+        $dateTo = $request->get('date_to');
+        $barangay = $request->get('barangay', 'all');
+        $incidentType = $request->get('incident_type', 'all');
+        $incidentId = $request->get('incident_id', 'all');
+        $user = $request->user();
+
+        // Base query for incidents
+        $incidentQuery = Incident::with([
+            'families' => function($query) {
+                $query->with(['members' => function($memberQuery) {
+                    $memberQuery->orderBy('position_in_family')->orderBy('last_name');
+                }])->orderBy('family_number');
+            },
+            'reporter'
+        ]);
+
+        if ($dateFrom && $dateTo) {
+            $incidentQuery->whereBetween('incident_date', [$dateFrom, $dateTo]);
+        }
+
+        // Filter by USER'S barangay for barangay users, incident's barangay for admin
+        if ($user->role === 'barangay') {
+            $incidentQuery->where('reported_by', $user->id);
+        } else {
+            if ($barangay !== 'all') {
+                $incidentQuery->where('barangay', $barangay);
+            }
+        }
+
+        if ($incidentType !== 'all') {
+            $incidentQuery->where('incident_type', $incidentType);
+        }
+        if ($incidentId !== 'all') {
+            $incidentQuery->where('id', $incidentId);
+        }
+
+        $incidents = $incidentQuery->get();
+
+        // Format the data for response
+        $formattedData = [];
+        $totalFamilies = 0;
+        $totalPersons = 0;
+
+        foreach ($incidents as $incident) {
+            $incidentData = [
+                'incident_id' => $incident->id,
+                'incident_title' => $incident->title,
+                'incident_type' => $incident->incident_type,
+                'incident_date' => $incident->incident_date,
+                'barangay' => $incident->barangay,
+                'location' => $incident->location,
+                'families' => []
+            ];
+
+            foreach ($incident->families as $family) {
+                $familyData = [
+                    'family_id' => $family->id,
+                    'family_number' => $family->family_number,
+                    'family_size' => $family->family_size,
+                    'evacuation_center' => $family->evacuation_center,
+                    'alternative_location' => $family->alternative_location,
+                    'assistance_received' => $family->assistance_received,
+                    'food_assistance' => $family->food_assistance,
+                    'non_food_assistance' => $family->non_food_assistance,
+                    'shelter_assistance' => $family->shelter_assistance,
+                    'medical_assistance' => $family->medical_assistance,
+                    'other_remarks' => $family->other_remarks,
+                    'members' => []
+                ];
+
+                foreach ($family->members as $member) {
+                    $memberData = [
+                        'member_id' => $member->id,
+                        'last_name' => $member->last_name,
+                        'first_name' => $member->first_name,
+                        'middle_name' => $member->middle_name,
+                        'full_name' => trim("{$member->first_name} {$member->middle_name} {$member->last_name}"),
+                        'position_in_family' => $member->position_in_family,
+                        'sex_gender_identity' => $member->sex_gender_identity,
+                        'age' => $member->age,
+                        'category' => $member->category,
+                        'civil_status' => $member->civil_status,
+                        'ethnicity' => $member->ethnicity,
+                        'vulnerable_groups' => $member->vulnerable_groups ?? [],
+                        'casualty' => $member->casualty,
+                        'displaced' => $member->displaced,
+                        'pwd_type' => $member->pwd_type,
+                        'assistance_received' => $member->assistance_received,
+                        'food_assistance' => $member->food_assistance,
+                        'non_food_assistance' => $member->non_food_assistance,
+                        'medical_attention' => $member->medical_attention,
+                        'psychological_support' => $member->psychological_support,
+                        'other_remarks' => $member->other_remarks,
+                    ];
+
+                    $familyData['members'][] = $memberData;
+                    $totalPersons++;
+                }
+
+                $incidentData['families'][] = $familyData;
+                $totalFamilies++;
+            }
+
+            $formattedData[] = $incidentData;
+        }
+
+        // Get selected incident details if specific incident is chosen
+        $selectedIncident = null;
+        if ($incidentId && $incidentId !== 'all') {
+            $selectedIncident = Incident::find($incidentId);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'incidents' => $formattedData,
+                'summary' => [
+                    'total_incidents' => $incidents->count(),
+                    'total_families' => $totalFamilies,
+                    'total_persons' => $totalPersons,
+                    'date_range' => [
+                        'from' => $dateFrom,
+                        'to' => $dateTo
+                    ],
+                    'filters' => [
+                        'barangay' => $barangay,
+                        'incident_type' => $incidentType,
+                        'incident_id' => $incidentId
+                    ]
+                ],
+                'selected_incident' => $selectedIncident ? [
+                    'id' => $selectedIncident->id,
+                    'title' => $selectedIncident->title,
+                    'incident_type' => $selectedIncident->incident_type,
+                    'incident_date' => $selectedIncident->incident_date,
+                    'barangay' => $selectedIncident->barangay
+                ] : null
+            ]
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Generate families persons report error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to generate families and persons report: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+
+// Add this method to your ReportController.php
+
+/**
+ * Get all barangays from users table
+ */
+public function getBarangaysFromUsers(Request $request)
+{
+    try {
+        $user = $request->user();
+
+        // For barangay users, only return their own barangay
+        if ($user->role === 'barangay') {
+            return response()->json([
+                'success' => true,
+                'barangays' => [$user->barangay_name]
+            ]);
+        }
+
+        // For admin users, get all unique barangays from approved users
+        $barangays = User::where('role', 'barangay')
+            ->where('is_approved', true)
+            ->where('is_active', true)
+            ->whereNotNull('barangay_name')
+            ->where('barangay_name', '!=', '')
+            ->distinct()
+            ->orderBy('barangay_name')
+            ->pluck('barangay_name')
+            ->toArray();
+
+        return response()->json([
+            'success' => true,
+            'barangays' => $barangays
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Get barangays from users error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch barangays'
+        ], 500);
+    }
+}
+
+
+
 }

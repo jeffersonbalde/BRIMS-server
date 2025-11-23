@@ -74,6 +74,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/incidents', [ReportController::class, 'generateIncidentsReport']); // NEW
         Route::post('/summary', [ReportController::class, 'generateSummaryReport']); // NEW
         Route::post('/incidents-dropdown', [ReportController::class, 'getIncidentsForDropdown']);
+
+        // Add this route to your api.php inside the reports prefix group
+        Route::post('/families-persons', [ReportController::class, 'generateFamiliesPersonsReport']);
+
+
+        // Add this route to your api.php inside the reports prefix group
+        Route::get('/barangays', [ReportController::class, 'getBarangaysFromUsers']);
     });
 
     // Population routes
@@ -115,5 +122,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // In the admin routes group, add:
         Route::get('/barangays/population-data', [AdminController::class, 'getAllBarangaysWithPopulationData']);
+
+        // Archived incidents management
+        Route::get('/archived-incidents', [AdminController::class, 'getArchivedIncidents']);
+        Route::delete('/archived-incidents/delete-all', [AdminController::class, 'deleteAllArchivedIncidents']);
+        Route::delete('/archived-incidents/{incident}', [AdminController::class, 'deleteArchivedIncident']);
+        Route::post('/archived-incidents/schedule-cleanup', [AdminController::class, 'scheduleArchivedCleanup']);
     });
 });

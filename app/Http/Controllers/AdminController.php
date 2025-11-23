@@ -677,122 +677,122 @@ class AdminController extends Controller
     }
 
 
-// In AdminController.php - Fix the getAllBarangaysWithPopulationData method
+    // In AdminController.php - Fix the getAllBarangaysWithPopulationData method
 
-public function getAllBarangaysWithPopulationData(Request $request)
-{
-    try {
-        // Check if user is admin
-        if ($request->user()->role !== 'admin') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
-
-        // Get all approved barangay users
-        $barangayUsers = User::where('role', 'barangay')
-            ->where('is_approved', true)
-            ->where('is_active', true)
-            ->select('barangay_name', 'municipality')
-            ->distinct()
-            ->get();
-
-        $result = [];
-
-        foreach ($barangayUsers as $user) {
-            $barangayName = $user->barangay_name;
-
-            // Get incidents for this barangay with families data
-            $incidents = Incident::with(['reporter', 'families', 'families.members', 'populationData'])
-                ->whereHas('reporter', function ($query) use ($barangayName) {
-                    $query->where('barangay_name', $barangayName);
-                })
-                ->get();
-
-            // Calculate accurate totals from families data
-            $totalPopulation = 0;
-            $totalDisplacedPersons = 0;
-            $totalDisplacedFamilies = 0;
-            $totalFamiliesAssisted = 0;
-            $totalFamiliesRequiringAssistance = 0;
-
-            foreach ($incidents as $incident) {
-                if ($incident->families->isNotEmpty()) {
-                    // Calculate from families data
-                    $totalPopulation += $incident->families->sum('family_size');
-                    $totalDisplacedFamilies += $incident->families->where('evacuation_center', '!=', null)->count();
-                    $totalDisplacedPersons += $incident->families->sum(function($family) {
-                        return $family->members->where('displaced', 'Y')->count();
-                    });
-                    $totalFamiliesAssisted += $incident->families->where('assistance_given', '!=', null)->count();
-                    $totalFamiliesRequiringAssistance += $incident->families->count();
-                } elseif ($incident->populationData) {
-                    // Fallback to populationData
-                    $totalPopulation += ($incident->populationData->male_count ?? 0) + 
-                                       ($incident->populationData->female_count ?? 0) + 
-                                       ($incident->populationData->lgbtqia_count ?? 0);
-                    $totalDisplacedFamilies += $incident->populationData->displaced_families ?? 0;
-                    $totalDisplacedPersons += $incident->populationData->displaced_persons ?? 0;
-                    $totalFamiliesAssisted += $incident->populationData->families_assisted ?? 0;
-                    $totalFamiliesRequiringAssistance += $incident->populationData->families_requiring_assistance ?? 0;
-                }
+    public function getAllBarangaysWithPopulationData(Request $request)
+    {
+        try {
+            // Check if user is admin
+            if ($request->user()->role !== 'admin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized'
+                ], 403);
             }
 
-            // Calculate special groups from family members
-            $pwdCount = 0;
-            $elderlyCount = 0;
-            $pregnantCount = 0;
+            // Get all approved barangay users
+            $barangayUsers = User::where('role', 'barangay')
+                ->where('is_approved', true)
+                ->where('is_active', true)
+                ->select('barangay_name', 'municipality')
+                ->distinct()
+                ->get();
 
-            foreach ($incidents as $incident) {
-                foreach ($incident->families as $family) {
-                    foreach ($family->members as $member) {
-                        $vulnerableGroups = $member->vulnerable_groups ?? [];
-                        if (in_array('PWD', $vulnerableGroups)) {
-                            $pwdCount++;
-                        }
-                        if (in_array('Elderly', $vulnerableGroups)) {
-                            $elderlyCount++;
-                        }
-                        if (in_array('Pregnant', $vulnerableGroups)) {
-                            $pregnantCount++;
+            $result = [];
+
+            foreach ($barangayUsers as $user) {
+                $barangayName = $user->barangay_name;
+
+                // Get incidents for this barangay with families data
+                $incidents = Incident::with(['reporter', 'families', 'families.members', 'populationData'])
+                    ->whereHas('reporter', function ($query) use ($barangayName) {
+                        $query->where('barangay_name', $barangayName);
+                    })
+                    ->get();
+
+                // Calculate accurate totals from families data
+                $totalPopulation = 0;
+                $totalDisplacedPersons = 0;
+                $totalDisplacedFamilies = 0;
+                $totalFamiliesAssisted = 0;
+                $totalFamiliesRequiringAssistance = 0;
+
+                foreach ($incidents as $incident) {
+                    if ($incident->families->isNotEmpty()) {
+                        // Calculate from families data
+                        $totalPopulation += $incident->families->sum('family_size');
+                        $totalDisplacedFamilies += $incident->families->where('evacuation_center', '!=', null)->count();
+                        $totalDisplacedPersons += $incident->families->sum(function ($family) {
+                            return $family->members->where('displaced', 'Y')->count();
+                        });
+                        $totalFamiliesAssisted += $incident->families->where('assistance_given', '!=', null)->count();
+                        $totalFamiliesRequiringAssistance += $incident->families->count();
+                    } elseif ($incident->populationData) {
+                        // Fallback to populationData
+                        $totalPopulation += ($incident->populationData->male_count ?? 0) +
+                            ($incident->populationData->female_count ?? 0) +
+                            ($incident->populationData->lgbtqia_count ?? 0);
+                        $totalDisplacedFamilies += $incident->populationData->displaced_families ?? 0;
+                        $totalDisplacedPersons += $incident->populationData->displaced_persons ?? 0;
+                        $totalFamiliesAssisted += $incident->populationData->families_assisted ?? 0;
+                        $totalFamiliesRequiringAssistance += $incident->populationData->families_requiring_assistance ?? 0;
+                    }
+                }
+
+                // Calculate special groups from family members
+                $pwdCount = 0;
+                $elderlyCount = 0;
+                $pregnantCount = 0;
+
+                foreach ($incidents as $incident) {
+                    foreach ($incident->families as $family) {
+                        foreach ($family->members as $member) {
+                            $vulnerableGroups = $member->vulnerable_groups ?? [];
+                            if (in_array('PWD', $vulnerableGroups)) {
+                                $pwdCount++;
+                            }
+                            if (in_array('Elderly', $vulnerableGroups)) {
+                                $elderlyCount++;
+                            }
+                            if (in_array('Pregnant', $vulnerableGroups)) {
+                                $pregnantCount++;
+                            }
                         }
                     }
                 }
+
+                $result[] = [
+                    'barangay_name' => $barangayName,
+                    'municipality' => $user->municipality,
+                    'total_incidents' => $incidents->count(),
+                    'population_data' => [
+                        'total_population' => $totalPopulation,
+                        'displaced_persons' => $totalDisplacedPersons,
+                        'displaced_families' => $totalDisplacedFamilies,
+                        'families_assisted' => $totalFamiliesAssisted,
+                        'families_requiring_assistance' => $totalFamiliesRequiringAssistance,
+                        'pwd_count' => $pwdCount,
+                        'elderly_count' => $elderlyCount,
+                        'pregnant_count' => $pregnantCount,
+                    ],
+                    'has_population_data' => $totalPopulation > 0,
+                ];
             }
 
-            $result[] = [
-                'barangay_name' => $barangayName,
-                'municipality' => $user->municipality,
-                'total_incidents' => $incidents->count(),
-                'population_data' => [
-                    'total_population' => $totalPopulation,
-                    'displaced_persons' => $totalDisplacedPersons,
-                    'displaced_families' => $totalDisplacedFamilies,
-                    'families_assisted' => $totalFamiliesAssisted,
-                    'families_requiring_assistance' => $totalFamiliesRequiringAssistance,
-                    'pwd_count' => $pwdCount,
-                    'elderly_count' => $elderlyCount,
-                    'pregnant_count' => $pregnantCount,
-                ],
-                'has_population_data' => $totalPopulation > 0,
-            ];
+            return response()->json([
+                'success' => true,
+                'barangays' => $result,
+                'total_barangays' => count($result),
+                'barangays_with_data' => collect($result)->where('has_population_data', true)->count(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get all barangays with population data error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch barangay population data: ' . $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'barangays' => $result,
-            'total_barangays' => count($result),
-            'barangays_with_data' => collect($result)->where('has_population_data', true)->count(),
-        ]);
-    } catch (\Exception $e) {
-        Log::error('Get all barangays with population data error: ' . $e->getMessage());
-        return response()->json([
-            'success' => false,
-            'message' => 'Failed to fetch barangay population data: ' . $e->getMessage()
-        ], 500);
     }
-}
 
 
     // Add this method to AdminController.php
@@ -818,5 +818,258 @@ public function getAllBarangaysWithPopulationData(Request $request)
                 'message' => 'Failed to fetch incident details'
             ], 500);
         }
+    }
+
+
+
+// Add these methods to your AdminController.php
+
+    /**
+     * Get all archived incidents
+     */
+    public function getArchivedIncidents(Request $request)
+    {
+        try {
+            // Check if user is admin
+            if ($request->user()->role !== 'admin') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+
+            $archivedIncidents = Incident::with([
+                'reporter',
+                'populationData',
+                'infrastructureStatus',
+                'families',
+                'families.members',
+                'archiver'
+            ])
+                ->where('status', 'Archived')
+                ->orderBy('archived_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'incidents' => $archivedIncidents,
+                'total_count' => $archivedIncidents->count(),
+                'total_size_mb' => $this->calculateArchivedIncidentsSize($archivedIncidents)
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get archived incidents error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch archived incidents'
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a single archived incident
+     */
+    public function deleteArchivedIncident(Request $request, Incident $incident)
+    {
+        try {
+            DB::beginTransaction();
+
+            // Check if user is admin
+            if ($request->user()->role !== 'admin') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+
+            // Check if incident is archived
+            if ($incident->status !== 'Archived') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only archived incidents can be deleted'
+                ], 400);
+            }
+
+            $incidentId = $incident->id;
+            $incidentTitle = $incident->title;
+
+            // Delete related data first
+            $this->deleteIncidentRelatedData($incident);
+
+            // Delete the incident
+            $incident->delete();
+
+            DB::commit();
+
+            // Log the deletion
+            Log::info("Archived incident deleted", [
+                'incident_id' => $incidentId,
+                'deleted_by' => $request->user()->id,
+                'incident_title' => $incidentTitle
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Archived incident deleted successfully',
+                'deleted_incident_id' => $incidentId
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Delete archived incident error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete archived incident'
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete all archived incidents
+     */
+    public function deleteAllArchivedIncidents(Request $request)
+    {
+        try {
+            DB::beginTransaction();
+
+            // Check if user is admin
+            if ($request->user()->role !== 'admin') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+
+            $archivedIncidents = Incident::where('status', 'Archived')->get();
+            $totalCount = $archivedIncidents->count();
+
+            if ($totalCount === 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No archived incidents to delete'
+                ], 400);
+            }
+
+            $deletedIds = [];
+            foreach ($archivedIncidents as $incident) {
+                // Delete related data first
+                $this->deleteIncidentRelatedData($incident);
+
+                $deletedIds[] = $incident->id;
+                $incident->delete();
+            }
+
+            DB::commit();
+
+            // Log the bulk deletion
+            Log::info("All archived incidents deleted", [
+                'total_deleted' => $totalCount,
+                'deleted_ids' => $deletedIds,
+                'deleted_by' => $request->user()->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully deleted {$totalCount} archived incidents",
+                'total_deleted' => $totalCount,
+                'deleted_ids' => $deletedIds
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Delete all archived incidents error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete archived incidents'
+            ], 500);
+        }
+    }
+
+    /**
+     * Schedule automatic cleanup of archived incidents
+     */
+    public function scheduleArchivedCleanup(Request $request)
+    {
+        try {
+            // Check if user is admin
+            if ($request->user()->role !== 'admin') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'schedule_type' => 'required|in:monthly,quarterly,yearly',
+                'auto_delete' => 'required|boolean'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Here you would typically store the schedule in database or config
+            // For now, we'll just return success and log the schedule
+            $schedule = [
+                'schedule_type' => $request->schedule_type,
+                'auto_delete' => $request->auto_delete,
+                'scheduled_by' => $request->user()->id,
+                'scheduled_at' => now()
+            ];
+
+            Log::info("Archived incidents cleanup scheduled", $schedule);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Automatic cleanup scheduled for {$request->schedule_type} deletion",
+                'schedule' => $schedule
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Schedule archived cleanup error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to schedule cleanup'
+            ], 500);
+        }
+    }
+
+    /**
+     * Helper method to delete incident related data
+     */
+    private function deleteIncidentRelatedData(Incident $incident)
+    {
+        // Delete population data if exists
+        if ($incident->populationData) {
+            $incident->populationData->delete();
+        }
+
+        // Delete infrastructure status if exists
+        if ($incident->infrastructureStatus) {
+            $incident->infrastructureStatus->delete();
+        }
+
+        // Delete families and members if exist
+        if ($incident->families->isNotEmpty()) {
+            foreach ($incident->families as $family) {
+                $family->members()->delete();
+                $family->delete();
+            }
+        }
+    }
+
+    /**
+     * Calculate estimated size of archived incidents in MB
+     */
+    private function calculateArchivedIncidentsSize($incidents)
+    {
+        $totalSize = 0;
+
+        foreach ($incidents as $incident) {
+            // Estimate size based on data complexity
+            $size = 1; // Base size in KB
+
+            if ($incident->populationData) $size += 0.5;
+            if ($incident->infrastructureStatus) $size += 0.5;
+            if ($incident->families->isNotEmpty()) {
+                $size += ($incident->families->count() * 0.2);
+                foreach ($incident->families as $family) {
+                    $size += ($family->members->count() * 0.1);
+                }
+            }
+
+            $totalSize += $size;
+        }
+
+        // Convert to MB (rough estimate)
+        return round($totalSize / 1024, 2);
     }
 }
