@@ -55,16 +55,25 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/incidents/{incident}/infrastructure-status', [IncidentController::class, 'getInfrastructureStatus']);
 
 
+    Route::get('/incidents/{incident}/with-families', [IncidentController::class, 'showWithFamilies']);
+
+
     // Analytics routes
     Route::prefix('analytics')->group(function () {
         Route::get('/municipal', [AnalyticsController::class, 'getMunicipalAnalytics']);
         Route::get('/barangay', [AnalyticsController::class, 'getBarangayAnalytics']);
     });
 
-    // Reports routes
+    // Add to api.php routes
+
+    // Add these to your api.php routes
     Route::prefix('reports')->group(function () {
         Route::post('/municipal', [ReportController::class, 'generateMunicipalReport']);
         Route::post('/barangay', [ReportController::class, 'generateBarangayReport']);
+        Route::post('/population-detailed', [ReportController::class, 'generateDetailedPopulationReport']);
+        Route::post('/incidents', [ReportController::class, 'generateIncidentsReport']); // NEW
+        Route::post('/summary', [ReportController::class, 'generateSummaryReport']); // NEW
+        Route::post('/incidents-dropdown', [ReportController::class, 'getIncidentsForDropdown']);
     });
 
     // Population routes
@@ -73,6 +82,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/municipal-overview', [PopulationController::class, 'getMunicipalOverview']);
         Route::get('/affected', [PopulationController::class, 'getAffectedPopulation']);
     });
+
+    Route::post('/incidents/with-families', [IncidentController::class, 'storeWithFamilies']);
+
+
+    Route::put('/incidents/{incident}/with-families', [IncidentController::class, 'updateWithFamilies']);
 
     // Admin routes
     Route::prefix('admin')->group(function () {
@@ -89,6 +103,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Incident management routes
         Route::get('/incidents', [AdminController::class, 'getAllIncidents']);
         Route::put('/incidents/{incident}/status', [AdminController::class, 'updateIncidentStatus']);
+        // In the admin routes group, add this route:
+        Route::get('/incidents/{incident}/details', [AdminController::class, 'getIncidentDetails']);
 
         Route::put('/incidents/{incident}/archive', [AdminController::class, 'archiveIncident']);
         Route::put('/incidents/{incident}/unarchive', [AdminController::class, 'unarchiveIncident']);

@@ -13,118 +13,8 @@ use Illuminate\Support\Facades\Log;
 class AnalyticsController extends Controller
 {
     /**
-     * Get barangay analytics
+     * Get municipal analytics with accurate data
      */
-    public function getBarangayAnalytics(Request $request)
-    {
-        try {
-            $user = $request->user();
-            
-            if ($user->role !== 'barangay') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Access denied. Barangay users only.'
-                ], 403);
-            }
-
-            $dateRange = $request->get('date_range', 'last_6_months');
-            $startDate = $this->getStartDate($dateRange);
-            
-            // Get incidents for this specific barangay user
-            $incidents = Incident::where('reported_by', $user->id)
-                ->where('created_at', '>=', $startDate)
-                ->get();
-
-            // Calculate analytics
-            $incidentsByType = $incidents->groupBy('incident_type')
-                ->map(function($group, $type) {
-                    return [
-                        'incident_type' => $type ?: 'Uncategorized',
-                        'count' => $group->count()
-                    ];
-                })->values()->sortByDesc('count');
-
-            $incidentsBySeverity = $incidents->groupBy('severity')
-                ->map(function($group, $severity) {
-                    return [
-                        'severity' => $severity ?: 'Not Specified',
-                        'count' => $group->count()
-                    ];
-                })->values();
-
-            $monthlyTrends = $incidents->groupBy(function($incident) {
-                    return $incident->created_at->format('M Y');
-                })
-                ->map(function($group, $month) {
-                    return [
-                        'month' => $month,
-                        'incidents' => $group->count()
-                    ];
-                })->values()->sortBy(function($item) {
-                    return Carbon::createFromFormat('M Y', $item['month'])->timestamp;
-                });
-
-            // Overall stats
-            $totalIncidents = $incidents->count();
-            $resolvedIncidents = $incidents->where('status', 'Resolved')->count();
-            $activeIncidents = $incidents->where('status', 'Active')->count();
-            $pendingIncidents = $incidents->where('status', 'Pending')->count();
-
-            // Population stats
-            $incidentsWithPopulation = $incidents->filter(function($incident) {
-                return $incident->populationData !== null;
-            });
-
-            $populationStats = [
-                'total_affected' => $incidentsWithPopulation->sum(function($incident) {
-                    return $incident->populationData->male_count + 
-                           $incident->populationData->female_count + 
-                           $incident->populationData->lgbtqia_count;
-                }),
-                'total_displaced_families' => $incidentsWithPopulation->sum('populationData.displaced_families'),
-                'total_displaced_persons' => $incidentsWithPopulation->sum('populationData.displaced_persons'),
-                'total_families_assisted' => $incidentsWithPopulation->sum('populationData.families_assisted'),
-                'total_families_requiring_assistance' => $incidentsWithPopulation->sum('populationData.families_requiring_assistance'),
-                'assistance_coverage' => $this->calculateAssistanceCoverage($incidentsWithPopulation)
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    // Summary stats
-                    'total_incidents' => $totalIncidents,
-                    'resolved_incidents' => $resolvedIncidents,
-                    'active_incidents' => $activeIncidents,
-                    'pending_incidents' => $pendingIncidents,
-                    
-                    // Charts data
-                    'incidents_by_type' => $incidentsByType,
-                    'incidents_by_severity' => $incidentsBySeverity,
-                    'monthly_trends' => $monthlyTrends,
-                    
-                    // Population data
-                    'population_stats' => $populationStats,
-                    
-                    // Additional useful data
-                    'incidents_with_population_data' => $incidentsWithPopulation->count(),
-                    'date_range' => [
-                        'start_date' => $startDate->format('Y-m-d'),
-                        'end_date' => now()->format('Y-m-d'),
-                        'range_type' => $dateRange
-                    ]
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Get barangay analytics error: ' . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch barangay analytics data'
-            ], 500);
-        }
-    }
-
     public function getMunicipalAnalytics(Request $request)
     {
         try {
@@ -140,12 +30,17 @@ class AnalyticsController extends Controller
             $dateRange = $request->get('date_range', 'last_6_months');
             $startDate = $this->getStartDate($dateRange);
             
-            // Get all incidents with reporters for the date range
-            $incidents = Incident::with('reporter')
-                ->where('created_at', '>=', $startDate)
-                ->get();
+            // Get all incidents with proper relationships
+            $incidents = Incident::with([
+                'reporter', 
+                'populationData',
+                'families',
+                'families.members'
+            ])
+            ->where('created_at', '>=', $startDate)
+            ->get();
 
-            // Calculate analytics from the collection (avoid complex SQL joins)
+            // Calculate accurate analytics from the data
             $incidentsByType = $incidents->groupBy('incident_type')
                 ->map(function($group, $type) {
                     return [
@@ -158,9 +53,15 @@ class AnalyticsController extends Controller
                     return $incident->reporter->barangay_name ?? 'Unknown';
                 })
                 ->map(function($group, $barangay) {
+                    // Calculate actual high/critical and resolved counts
+                    $highCritical = $group->whereIn('severity', ['High', 'Critical'])->count();
+                    $resolved = $group->where('status', 'Resolved')->count();
+                    
                     return [
                         'barangay_name' => $barangay,
-                        'count' => $group->count()
+                        'count' => $group->count(),
+                        'high_critical_count' => $highCritical,
+                        'resolved_count' => $resolved
                     ];
                 })->values()->sortByDesc('count');
 
@@ -172,7 +73,9 @@ class AnalyticsController extends Controller
                         'month' => $month,
                         'incidents' => $group->count()
                     ];
-                })->values()->sortBy('month');
+                })->values()->sortBy(function($item) {
+                    return Carbon::createFromFormat('M Y', $item['month'])->timestamp;
+                });
 
             $severityDistribution = $incidents->groupBy('severity')
                 ->map(function($group, $severity) {
@@ -190,12 +93,12 @@ class AnalyticsController extends Controller
                     ];
                 })->values();
 
-            // Overall stats
+            // Calculate accurate overall stats
             $totalIncidents = $incidents->count();
             $resolvedIncidents = $incidents->where('status', 'Resolved')->count();
             $highCriticalIncidents = $incidents->whereIn('severity', ['High', 'Critical'])->count();
 
-            // Calculate average response time
+            // Calculate actual average response time for resolved incidents
             $resolvedIncidentsWithTime = $incidents->where('status', 'Resolved')
                 ->filter(function($incident) {
                     return $incident->created_at && $incident->updated_at;
@@ -207,21 +110,8 @@ class AnalyticsController extends Controller
                 })
                 : 0;
 
-            // Population stats
-            $incidentsWithPopulation = $incidents->filter(function($incident) {
-                return $incident->populationData !== null;
-            });
-
-            $populationStats = [
-                'total_affected' => $incidentsWithPopulation->sum(function($incident) {
-                    return $incident->populationData->male_count + 
-                           $incident->populationData->female_count + 
-                           $incident->populationData->lgbtqia_count;
-                }),
-                'total_displaced_families' => $incidentsWithPopulation->sum('populationData.displaced_families'),
-                'total_displaced_persons' => $incidentsWithPopulation->sum('populationData.displaced_persons'),
-                'avg_assistance_coverage' => $this->calculateAssistanceCoverage($incidentsWithPopulation)
-            ];
+            // Calculate accurate population stats from families data
+            $populationStats = $this->calculateAccuratePopulationStats($incidents);
 
             return response()->json([
                 'success' => true,
@@ -240,8 +130,8 @@ class AnalyticsController extends Controller
                     ],
                     'population_stats' => $populationStats,
                     'date_range' => [
-                        'start_date' => $startDate,
-                        'end_date' => now()->format('Y-m-d H:i:s'),
+                        'start_date' => $startDate->format('Y-m-d'),
+                        'end_date' => now()->format('Y-m-d'),
                         'range_type' => $dateRange
                     ]
                 ]
@@ -252,21 +142,57 @@ class AnalyticsController extends Controller
             
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch analytics data'
+                'message' => 'Failed to fetch analytics data: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    private function calculateAssistanceCoverage($incidentsWithPopulation)
+    /**
+     * Calculate accurate population statistics from incidents with families
+     */
+    private function calculateAccuratePopulationStats($incidents)
     {
-        $totalRequiring = $incidentsWithPopulation->sum('populationData.families_requiring_assistance');
-        $totalAssisted = $incidentsWithPopulation->sum('populationData.families_assisted');
-        
-        if ($totalRequiring > 0) {
-            return round(($totalAssisted / $totalRequiring) * 100, 1);
+        $totalAffected = 0;
+        $totalDisplacedFamilies = 0;
+        $totalDisplacedPersons = 0;
+        $totalFamiliesAssisted = 0;
+        $totalFamiliesRequiringAssistance = 0;
+
+        foreach ($incidents as $incident) {
+            // Count from families data if available
+            if ($incident->families->isNotEmpty()) {
+                $totalAffected += $incident->families->sum('family_size');
+                $totalDisplacedFamilies += $incident->families->where('evacuation_center', '!=', null)->count();
+                $totalDisplacedPersons += $incident->families->sum(function($family) {
+                    return $family->members->where('displaced', 'Y')->count();
+                });
+                $totalFamiliesAssisted += $incident->families->where('assistance_given', '!=', null)->count();
+                $totalFamiliesRequiringAssistance += $incident->families->count(); // All families need assistance initially
+            }
+            // Fallback to populationData if no families data
+            elseif ($incident->populationData) {
+                $totalAffected += ($incident->populationData->male_count ?? 0) + 
+                                 ($incident->populationData->female_count ?? 0) + 
+                                 ($incident->populationData->lgbtqia_count ?? 0);
+                $totalDisplacedFamilies += $incident->populationData->displaced_families ?? 0;
+                $totalDisplacedPersons += $incident->populationData->displaced_persons ?? 0;
+                $totalFamiliesAssisted += $incident->populationData->families_assisted ?? 0;
+                $totalFamiliesRequiringAssistance += $incident->populationData->families_requiring_assistance ?? 0;
+            }
         }
-        
-        return 0;
+
+        $assistanceCoverage = $totalFamiliesRequiringAssistance > 0 
+            ? round(($totalFamiliesAssisted / $totalFamiliesRequiringAssistance) * 100, 1)
+            : 0;
+
+        return [
+            'total_affected' => $totalAffected,
+            'total_displaced_families' => $totalDisplacedFamilies,
+            'total_displaced_persons' => $totalDisplacedPersons,
+            'total_families_assisted' => $totalFamiliesAssisted,
+            'total_families_requiring_assistance' => $totalFamiliesRequiringAssistance,
+            'avg_assistance_coverage' => $assistanceCoverage
+        ];
     }
 
     private function getStartDate($rangeType)

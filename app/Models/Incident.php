@@ -16,6 +16,8 @@ class Incident extends Model
         'title',
         'description',
         'location',
+        'barangay', // ADD THIS
+        'purok', // ADD THIS
         'incident_date',
         'severity',
         'status',
@@ -215,5 +217,34 @@ class Incident extends Model
         if ($user->role === 'admin') return true;
         if ($user->role === 'barangay' && $this->reported_by === $user->id) return true;
         return false;
+    }
+
+    // Add to app/Models/Incident.php
+
+    public function families()
+    {
+        return $this->hasMany(IncidentFamily::class);
+    }
+
+    public function familyMembers()
+    {
+        return $this->hasManyThrough(IncidentFamilyMember::class, IncidentFamily::class);
+    }
+
+    // Add this method to calculate summary data
+    public function getPopulationSummaryAttribute()
+    {
+        $members = $this->familyMembers;
+
+        return [
+            'total_families' => $this->families->count(),
+            'total_persons' => $members->count(),
+            'displaced_families' => $this->families->where('evacuation_center', '!=', null)->count(),
+            'displaced_persons' => $members->where('displaced', 'Y')->count(),
+            'male_count' => $members->where('sex_gender_identity', 'Male')->count(),
+            'female_count' => $members->where('sex_gender_identity', 'Female')->count(),
+            'lgbtqia_count' => $members->where('sex_gender_identity', 'LGBTQIA+ / Other (self-identified)')->count(),
+            // Add more summary calculations as needed
+        ];
     }
 }

@@ -11,11 +11,13 @@ return new class extends Migration
     {
         Schema::create('incidents', function (Blueprint $table) {
             $table->id();
-            $table->foreignId(column: 'reported_by')->constrained('users')->onDelete('cascade');
+            $table->foreignId('reported_by')->constrained('users')->onDelete('cascade');
             $table->enum('incident_type', ['Flood', 'Landslide', 'Fire', 'Earthquake', 'Vehicular']);
             $table->string('title');
             $table->text('description')->nullable();
             $table->string('location');
+            $table->string('barangay'); // ADD THIS
+            $table->string('purok')->nullable(); // ADD THIS
             $table->dateTime('incident_date');
             $table->enum('severity', ['Low', 'Medium', 'High', 'Critical']);
             $table->enum('status', ['Reported', 'Investigating', 'Resolved'])->default('Reported');
@@ -26,10 +28,13 @@ return new class extends Migration
             $table->text('admin_notes')->nullable();
             $table->timestamps();
             
+            // Indexes
             $table->index('reported_by');
             $table->index('incident_type');
             $table->index('severity');
             $table->index('status');
+            $table->index('barangay'); // ADD THIS
+            $table->index('purok'); // ADD THIS
             $table->index('created_at');
         });
     }

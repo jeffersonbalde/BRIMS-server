@@ -492,10 +492,17 @@ class AdminController extends Controller
         }
     }
 
+    // In AdminController.php - update the getAllIncidents method
     public function getAllIncidents(Request $request)
     {
         try {
-            $incidents = Incident::with(['reporter'])
+            $incidents = Incident::with([
+                'reporter',
+                'populationData',
+                'infrastructureStatus',
+                'families', // ADD THIS
+                'families.members' // ADD THIS
+            ])
                 ->orderBy('created_at', 'desc')
                 ->get();
 
@@ -669,7 +676,9 @@ class AdminController extends Controller
         }
     }
 
-// Add this method to your AdminController.php
+
+// In AdminController.php - Fix the getAllBarangaysWithPopulationData method
+
 public function getAllBarangaysWithPopulationData(Request $request)
 {
     try {
@@ -693,25 +702,64 @@ public function getAllBarangaysWithPopulationData(Request $request)
 
         foreach ($barangayUsers as $user) {
             $barangayName = $user->barangay_name;
-            
-            // Get incidents for this barangay with population data
-            // Use populationData() instead of population_data()
-            $incidents = Incident::with(['reporter', 'populationData'])
-                ->whereHas('reporter', function($query) use ($barangayName) {
+
+            // Get incidents for this barangay with families data
+            $incidents = Incident::with(['reporter', 'families', 'families.members', 'populationData'])
+                ->whereHas('reporter', function ($query) use ($barangayName) {
                     $query->where('barangay_name', $barangayName);
                 })
-                ->whereHas('populationData') // Fixed: use populationData instead of population_data
                 ->get();
 
-            // Calculate basic totals
-            $totalPopulation = $incidents->sum(function($incident) {
-                $pop = $incident->populationData; // Fixed: use populationData instead of population_data
-                return ($pop->male_count ?? 0) + ($pop->female_count ?? 0) + ($pop->lgbtqia_count ?? 0);
-            });
+            // Calculate accurate totals from families data
+            $totalPopulation = 0;
+            $totalDisplacedPersons = 0;
+            $totalDisplacedFamilies = 0;
+            $totalFamiliesAssisted = 0;
+            $totalFamiliesRequiringAssistance = 0;
 
-            $totalDisplaced = $incidents->sum(function($incident) {
-                return $incident->populationData->displaced_persons ?? 0; // Fixed: use populationData
-            });
+            foreach ($incidents as $incident) {
+                if ($incident->families->isNotEmpty()) {
+                    // Calculate from families data
+                    $totalPopulation += $incident->families->sum('family_size');
+                    $totalDisplacedFamilies += $incident->families->where('evacuation_center', '!=', null)->count();
+                    $totalDisplacedPersons += $incident->families->sum(function($family) {
+                        return $family->members->where('displaced', 'Y')->count();
+                    });
+                    $totalFamiliesAssisted += $incident->families->where('assistance_given', '!=', null)->count();
+                    $totalFamiliesRequiringAssistance += $incident->families->count();
+                } elseif ($incident->populationData) {
+                    // Fallback to populationData
+                    $totalPopulation += ($incident->populationData->male_count ?? 0) + 
+                                       ($incident->populationData->female_count ?? 0) + 
+                                       ($incident->populationData->lgbtqia_count ?? 0);
+                    $totalDisplacedFamilies += $incident->populationData->displaced_families ?? 0;
+                    $totalDisplacedPersons += $incident->populationData->displaced_persons ?? 0;
+                    $totalFamiliesAssisted += $incident->populationData->families_assisted ?? 0;
+                    $totalFamiliesRequiringAssistance += $incident->populationData->families_requiring_assistance ?? 0;
+                }
+            }
+
+            // Calculate special groups from family members
+            $pwdCount = 0;
+            $elderlyCount = 0;
+            $pregnantCount = 0;
+
+            foreach ($incidents as $incident) {
+                foreach ($incident->families as $family) {
+                    foreach ($family->members as $member) {
+                        $vulnerableGroups = $member->vulnerable_groups ?? [];
+                        if (in_array('PWD', $vulnerableGroups)) {
+                            $pwdCount++;
+                        }
+                        if (in_array('Elderly', $vulnerableGroups)) {
+                            $elderlyCount++;
+                        }
+                        if (in_array('Pregnant', $vulnerableGroups)) {
+                            $pregnantCount++;
+                        }
+                    }
+                }
+            }
 
             $result[] = [
                 'barangay_name' => $barangayName,
@@ -719,36 +767,15 @@ public function getAllBarangaysWithPopulationData(Request $request)
                 'total_incidents' => $incidents->count(),
                 'population_data' => [
                     'total_population' => $totalPopulation,
-                    'male_count' => $incidents->sum(function($incident) {
-                        return $incident->populationData->male_count ?? 0; // Fixed: use populationData
-                    }),
-                    'female_count' => $incidents->sum(function($incident) {
-                        return $incident->populationData->female_count ?? 0; // Fixed: use populationData
-                    }),
-                    'lgbtqia_count' => $incidents->sum(function($incident) {
-                        return $incident->populationData->lgbtqia_count ?? 0; // Fixed: use populationData
-                    }),
-                    'displaced_persons' => $totalDisplaced,
-                    'displaced_families' => $incidents->sum(function($incident) {
-                        return $incident->populationData->displaced_families ?? 0; // Fixed: use populationData
-                    }),
-                    'families_assisted' => $incidents->sum(function($incident) {
-                        return $incident->populationData->families_assisted ?? 0; // Fixed: use populationData
-                    }),
-                    'families_requiring_assistance' => $incidents->sum(function($incident) {
-                        return $incident->populationData->families_requiring_assistance ?? 0; // Fixed: use populationData
-                    }),
-                    'pwd_count' => $incidents->sum(function($incident) {
-                        return $incident->populationData->pwd_count ?? 0; // Fixed: use populationData
-                    }),
-                    'elderly_count' => $incidents->sum(function($incident) {
-                        return $incident->populationData->elderly_count ?? 0; // Fixed: use populationData
-                    }),
-                    'pregnant_count' => $incidents->sum(function($incident) {
-                        return $incident->populationData->pregnant_count ?? 0; // Fixed: use populationData
-                    }),
+                    'displaced_persons' => $totalDisplacedPersons,
+                    'displaced_families' => $totalDisplacedFamilies,
+                    'families_assisted' => $totalFamiliesAssisted,
+                    'families_requiring_assistance' => $totalFamiliesRequiringAssistance,
+                    'pwd_count' => $pwdCount,
+                    'elderly_count' => $elderlyCount,
+                    'pregnant_count' => $pregnantCount,
                 ],
-                'has_population_data' => $incidents->count() > 0,
+                'has_population_data' => $totalPopulation > 0,
             ];
         }
 
@@ -758,7 +785,6 @@ public function getAllBarangaysWithPopulationData(Request $request)
             'total_barangays' => count($result),
             'barangays_with_data' => collect($result)->where('has_population_data', true)->count(),
         ]);
-
     } catch (\Exception $e) {
         Log::error('Get all barangays with population data error: ' . $e->getMessage());
         return response()->json([
@@ -767,4 +793,30 @@ public function getAllBarangaysWithPopulationData(Request $request)
         ], 500);
     }
 }
+
+
+    // Add this method to AdminController.php
+    public function getIncidentDetails($id)
+    {
+        try {
+            $incident = Incident::with([
+                'reporter',
+                'populationData',
+                'infrastructureStatus',
+                'families',
+                'families.members'
+            ])->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'incident' => $incident
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get incident details error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch incident details'
+            ], 500);
+        }
+    }
 }
