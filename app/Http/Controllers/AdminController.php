@@ -71,6 +71,8 @@ public function getBarangaysSummaryForDashboard(Request $request)
                                                      ($popData->lgbtqia_count ?? 0);
                         $carry['has_data'] = true;
                     }
+
+                    
                     return $carry;
                 }, ['total_population' => 0, 'has_data' => false]);
 
