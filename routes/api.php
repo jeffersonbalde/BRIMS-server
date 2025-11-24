@@ -97,6 +97,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin routes
     Route::prefix('admin')->group(function () {
+
+        // Add this NEW optimized route for dashboard
+        Route::get('/dashboard/barangays-summary', [AdminController::class, 'getBarangaysSummaryForDashboard']);
+
+
         // User approval management
         Route::get('/pending-users', [AdminController::class, 'getPendingUsers']);
         Route::post('/users/{user}/approve', [AdminController::class, 'approveUser']);

@@ -21,6 +21,94 @@ class AdminController extends Controller
         $this->notificationService = $notificationService;
     }
 
+
+    // In AdminController.php - Add this NEW optimized method
+public function getBarangaysSummaryForDashboard(Request $request)
+{
+    try {
+        // Check if user is admin
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        // OPTIMIZED: Get only what we need for the dashboard
+        $barangayUsers = User::where('role', 'barangay')
+            ->where('is_approved', true)
+            ->where('is_active', true)
+            ->select('barangay_name', 'municipality')
+            ->distinct()
+            ->get();
+
+        $result = [];
+        $totalPopulation = 0;
+        $barangaysWithData = 0;
+
+        foreach ($barangayUsers as $user) {
+            $barangayName = $user->barangay_name;
+
+            // OPTIMIZED: Get only incident counts and basic population data
+            $incidentCount = Incident::whereHas('reporter', function ($query) use ($barangayName) {
+                $query->where('barangay_name', $barangayName);
+            })->count();
+
+            // OPTIMIZED: Get population data from incidents with families
+            $populationData = Incident::with(['families', 'populationData'])
+                ->whereHas('reporter', function ($query) use ($barangayName) {
+                    $query->where('barangay_name', $barangayName);
+                })
+                ->get()
+                ->reduce(function ($carry, $incident) {
+                    if ($incident->families->isNotEmpty()) {
+                        $carry['total_population'] += $incident->families->sum('family_size');
+                        $carry['has_data'] = true;
+                    } elseif ($incident->populationData) {
+                        $popData = $incident->populationData;
+                        $carry['total_population'] += ($popData->male_count ?? 0) + 
+                                                     ($popData->female_count ?? 0) + 
+                                                     ($popData->lgbtqia_count ?? 0);
+                        $carry['has_data'] = true;
+                    }
+                    return $carry;
+                }, ['total_population' => 0, 'has_data' => false]);
+
+            $barangayPopulation = $populationData['total_population'];
+            $totalPopulation += $barangayPopulation;
+            
+            if ($populationData['has_data']) {
+                $barangaysWithData++;
+            }
+
+            $result[] = [
+                'barangay_name' => $barangayName,
+                'municipality' => $user->municipality,
+                'total_incidents' => $incidentCount,
+                'population_data' => [
+                    'total_population' => $barangayPopulation,
+                ],
+                'has_population_data' => $populationData['has_data'],
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'barangays' => $result,
+            'total_barangays' => count($result),
+            'barangays_with_data' => $barangaysWithData,
+            'total_population' => $totalPopulation, // Add this for easy access in dashboard
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Get barangays summary for dashboard error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch barangay summary data'
+        ], 500);
+    }
+}
+
     /**
      * Deactivate user account
      */
