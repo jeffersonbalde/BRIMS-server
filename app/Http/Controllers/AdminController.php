@@ -583,29 +583,57 @@ public function getBarangaysSummaryForDashboard(Request $request)
     }
 
     // In AdminController.php - update the getAllIncidents method
-    public function getAllIncidents(Request $request)
-    {
-        try {
-            $incidents = Incident::with([
-                'reporter',
-                'populationData',
-                'infrastructureStatus',
-                'families', // ADD THIS
-                'families.members' // ADD THIS
-            ])
-                ->orderBy('created_at', 'desc')
-                ->get();
+public function getAllIncidents(Request $request)
+{
+    try {
+        $incidents = Incident::with([
+            'reporter',
+            'populationData',
+            'infrastructureStatus',
+            'families',
+            'families.members'
+        ])
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-            return response()->json([
-                'incidents' => $incidents
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Get all incidents error: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Failed to fetch incidents'
-            ], 500);
-        }
+        // Calculate casualties from family members for each incident
+        $incidents->each(function ($incident) {
+            $casualties = [
+                'dead' => 0,
+                'injured' => 0,
+                'missing' => 0
+            ];
+
+            foreach ($incident->families as $family) {
+                foreach ($family->members as $member) {
+                    switch ($member->casualty) {
+                        case 'Dead':
+                            $casualties['dead']++;
+                            break;
+                        case 'Injured/ill':
+                            $casualties['injured']++;
+                            break;
+                        case 'Missing':
+                            $casualties['missing']++;
+                            break;
+                    }
+                }
+            }
+
+            // Add calculated casualties to the incident
+            $incident->calculated_casualties = $casualties;
+        });
+
+        return response()->json([
+            'incidents' => $incidents
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Get all incidents error: ' . $e->getMessage());
+        return response()->json([
+            'message' => 'Failed to fetch incidents'
+        ], 500);
     }
+}
 
     public function updateIncidentStatus(Request $request, Incident $incident)
     {
